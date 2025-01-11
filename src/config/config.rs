@@ -28,10 +28,12 @@ struct Repo {
 
 impl Config {
     pub fn load_config() -> Result<Self, Error> {
-        let exe_path = env::current_exe().context("Failed to get current executable path")?;
-        let dir = exe_path
+        let dir = env::current_exe()
+            .context("failed to get current executable path")?
             .parent()
-            .context("Failed to get directory of executable")?;
+            .context("failed to get directory of exe")?
+            .to_path_buf();
+
         let config_path = dir.join("config.toml");
 
         let config_str = fs::read_to_string(&config_path)
