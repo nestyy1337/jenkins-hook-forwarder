@@ -1,4 +1,5 @@
 mod config;
+pub mod logging;
 use axum::http::HeaderMap;
 use axum::{Json, Router, routing::post};
 use config::Config;
