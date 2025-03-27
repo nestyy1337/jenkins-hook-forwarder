@@ -69,37 +69,68 @@ async fn handle_hook(event_type: HeaderMap, Json(payload): Json<serde_json::Valu
     };
 
     let branch = hook.ref_field.trim_start_matches("refs/heads/");
-    let repo = hook.repository.name;
+    let repo_name = hook.repository.name;
 
     let jenkins_url = CONFIG.jenkins.get_url();
     let username = CONFIG.jenkins.username.clone();
     let api_key = CONFIG.jenkins.api.clone();
 
-    if let Some(job) = CONFIG.find_job(&repo, branch) {
-        let client = reqwest::Client::new();
-        let mut params = HashMap::new();
-        params.insert("token", api_key.clone());
-
-        let res = client
-            .get(format!("{}/{}/build", &jenkins_url, &job))
-            .basic_auth(&username, Some(&api_key))
-            .query(&params)
-            .send()
-            .await;
-
-        match res {
-            Ok(response) => {
+    for (folder_name, projects) in &CONFIG.folder {
+        for (project_name, _) in projects {
+            if project_name == &repo_name {
                 info!(
-                    "Build '{}' has been triggered by push to {}/{}",
-                    job, repo, branch
+                    "Received push to {}/{} branch: {}",
+                    folder_name, project_name, branch
                 );
-                info!("Response: {:?}", response);
-            }
-            Err(e) => {
-                error!("Failed to trigger build for {}: {:?}", job, e);
+                if let Some(jobs) = CONFIG.find_jobs(folder_name, project_name, branch) {
+                    for job in jobs {
+                        let client = reqwest::Client::builder()
+                            .danger_accept_invalid_certs(true)
+                            .build()
+                            .expect("Failed to build reqwest client");
+
+                        let mut params = HashMap::new();
+                        params.insert("token", api_key.clone());
+
+                        info!(
+                            "Triggering build at {}/{}/{}/buildWithParameters",
+                            &jenkins_url, &folder_name, &job
+                        );
+
+                        let res = client
+                            .get(format!(
+                                "{}/{}/{}/buildWithParameters",
+                                &jenkins_url, &folder_name, &job
+                            ))
+                            .basic_auth(&username, Some(&api_key))
+                            .query(&params)
+                            .send()
+                            .await;
+
+                        match res {
+                            Ok(response) => {
+                                info!(
+                                    "Build '{}' has been triggered by push to {}/{}",
+                                    job, repo_name, branch
+                                );
+                                info!("Response: {:?}", response);
+                            }
+                            Err(e) => {
+                                error!("Failed to trigger build for {}: {:?}", job, e);
+                            }
+                        }
+                    }
+                } else {
+                    warn!(
+                        "No jobs found for repo '{}' and branch '{}'",
+                        repo_name, branch
+                    );
+                }
+                return;
             }
         }
-    } else {
-        warn!("No job found for repo '{}' and branch '{}'", repo, branch);
     }
+
+    // we couldnt find a matched project
+    info!("No project found for repo '{}'", repo_name);
 }

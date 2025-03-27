@@ -1,5 +1,4 @@
 use anyhow::{Context, Error, Result};
-use lazy_static::lazy_static;
 use serde::Deserialize;
 use std::{collections::HashMap, env, fs};
 use toml;
@@ -7,8 +6,12 @@ use toml;
 #[derive(Deserialize, Debug)]
 pub struct Config {
     pub jenkins: Jenkins,
-    pub repos: HashMap<String, Repo>,
+    pub folder: HashMap<String, HashMap<String, BranchJobMapping>>,
 }
+
+type Branch = String;
+type Job = String;
+type BranchJobMapping = HashMap<Branch, Vec<Job>>;
 
 #[derive(Deserialize, Debug)]
 pub struct Jenkins {
@@ -16,14 +19,6 @@ pub struct Jenkins {
     port: u32,
     pub api: String,
     pub username: String,
-}
-
-type Branch = String;
-type Job = String;
-
-#[derive(Deserialize, Debug)]
-struct Repo {
-    branch_job_mapping: HashMap<Branch, Job>,
 }
 
 impl Config {
@@ -46,32 +41,58 @@ impl Config {
         Ok(config)
     }
 
+    pub fn find_jobs(&self, folder: &str, project: &str, branch: &str) -> Option<&Vec<String>> {
+        self.folder
+            .get(folder)
+            .and_then(|projects| projects.get(project))
+            .and_then(|branches| branches.get(branch))
+    }
+
     fn validate(&self) -> Result<()> {
         self.jenkins
             .validate()
             .context("Invalid Jenkins configuration")?;
-        if self.repos.is_empty() {
-            anyhow::bail!("The 'repos' field must not be empty");
+        if self.folder.is_empty() {
+            anyhow::bail!("The 'folder' field must not be empty");
         }
-        for (repo_name, repo) in &self.repos {
-            if repo.branch_job_mapping.is_empty() {
+        for (folder_name, projects) in &self.folder {
+            if projects.is_empty() {
                 anyhow::bail!(
-                    "The 'branch_job_mapping' for repo '{}' must not be empty",
-                    repo_name
+                    "The projects for folder '{}' must not be empty",
+                    folder_name
                 );
+            }
+            for (project_name, branches) in projects {
+                if branches.is_empty() {
+                    anyhow::bail!(
+                        "The branch mapping for project '{}' in folder '{}' must not be empty",
+                        project_name,
+                        folder_name
+                    );
+                }
+                for (branch_name, jobs) in branches {
+                    if jobs.is_empty() {
+                        anyhow::bail!(
+                            "The jobs list for branch '{}' in project '{}' in folder '{}' must not be empty",
+                            branch_name,
+                            project_name,
+                            folder_name
+                        );
+                    }
+                }
             }
         }
         Ok(())
     }
 
-    pub fn get_repos(&self) -> Vec<&str> {
-        self.repos.keys().map(|k| k.as_str()).collect()
+    pub fn get_folders(&self) -> Vec<&str> {
+        self.folder.keys().map(|k| k.as_str()).collect()
     }
 
-    pub fn find_job(&self, repo: &str, branch: &str) -> Option<&String> {
-        self.repos
-            .get(repo)
-            .and_then(|branches| branches.branch_job_mapping.get(branch))
+    pub fn get_projects(&self, folder: &str) -> Option<Vec<&str>> {
+        self.folder
+            .get(folder)
+            .map(|projects| projects.keys().map(|k| k.as_str()).collect())
     }
 }
 
@@ -91,18 +112,5 @@ impl Jenkins {
 
     pub fn get_url(&self) -> String {
         format!("{}:{}/job", self.url, self.port)
-    }
-}
-
-impl Repo {
-    pub fn get_branches(&self) -> Vec<&str> {
-        self.branch_job_mapping.keys().map(|k| k.as_str()).collect()
-    }
-
-    pub fn get_jobs(&self) -> Vec<&str> {
-        self.branch_job_mapping
-            .values()
-            .map(|v| v.as_str())
-            .collect()
     }
 }

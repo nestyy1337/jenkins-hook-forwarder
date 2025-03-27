@@ -5,8 +5,8 @@ use jenkins_hooks::{
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() {
-    let defualt_subscriber = get_subscriber("INFO", "./log");
-    init_subscriber(defualt_subscriber);
+    let (subscriber, _guard) = get_subscriber("INFO", "./log");
+    init_subscriber(subscriber);
 
     let app = App::create_app().await;
     app.run().await;
